@@ -126,4 +126,5 @@ async def channels(interaction: discord.Interaction):
     text_channels = [ch.name for ch in interaction.guild.text_channels]
     await interaction.response.send_message("Channels:\n" + "\n".join(text_channels), ephemeral=True)
 
+keep_alive()
 client.run(config.TOKEN)
