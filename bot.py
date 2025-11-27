@@ -23,7 +23,7 @@ class MyBot(discord.Client):
         if guild:
             log_channel = discord.utils.get(guild.text_channels, name="moderator-only")
             if log_channel:
-                await log_channel.send(f"✅ Bot is online as {self.user} (ID: {self.user.id})")
+                await log_channel.send(f"Bot is online as {self.user} (ID: {self.user.id})")
 
     async def on_error(self, event_method, *args, **kwargs):
         tb = traceback.format_exc()
@@ -31,7 +31,7 @@ class MyBot(discord.Client):
         if guild:
             log_channel = discord.utils.get(guild.text_channels, name="moderator-only")
             if log_channel:
-                await log_channel.send(f"❌ Bot crashed in `{event_method}`:\n```{tb}```")
+                await log_channel.send(f"Bot crashed in `{event_method}`:\n```{tb}```")
 
     async def on_guild_join(self, guild):
         if guild.id != config.GUILD_ID:
