@@ -23,7 +23,12 @@ class MyBot(discord.Client):
         if guild:
             log_channel = discord.utils.get(guild.text_channels, name="moderator-only")
             if log_channel:
-                await log_channel.send(f"Bot is online as {self.user} (ID: {self.user.id})")
+                embed = discord.Embed(
+                    title="Bot Online",
+                    description=f"Logged in as {self.user} (ID: {self.user.id})",
+                    color=discord.Color.green()
+                )
+                await log_channel.send(embed=embed)
 
     async def on_error(self, event_method, *args, **kwargs):
         tb = traceback.format_exc()
@@ -31,7 +36,13 @@ class MyBot(discord.Client):
         if guild:
             log_channel = discord.utils.get(guild.text_channels, name="moderator-only")
             if log_channel:
-                await log_channel.send(f"Bot crashed in `{event_method}`:\n```{tb}```")
+                embed = discord.Embed(
+                    title="Bot Error",
+                    description=f"Error in `{event_method}`",
+                    color=discord.Color.red()
+                )
+                embed.add_field(name="Traceback", value=f"```{tb}```", inline=False)
+                await log_channel.send(embed=embed)
 
     async def on_guild_join(self, guild):
         if guild.id != config.GUILD_ID:
@@ -45,13 +56,15 @@ async def log_command(interaction: discord.Interaction):
         if guild:
             log_channel = discord.utils.get(guild.text_channels, name="moderator-only")
             if log_channel:
-                details = (
-                    f"Command: {interaction.command.name}\n"
-                    f"User: {interaction.user} (ID: {interaction.user.id})\n"
-                    f"Channel: {interaction.channel} (ID: {interaction.channel.id})\n"
-                    f"Time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+                embed = discord.Embed(
+                    title="Command Used",
+                    color=discord.Color.blue()
                 )
-                await log_channel.send(details)
+                embed.add_field(name="Command", value=interaction.command.name, inline=True)
+                embed.add_field(name="User", value=f"{interaction.user} (ID: {interaction.user.id})", inline=False)
+                embed.add_field(name="Channel", value=f"{interaction.channel} (ID: {interaction.channel.id})", inline=False)
+                embed.add_field(name="Time", value=time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()), inline=False)
+                await log_channel.send(embed=embed)
 
 @client.tree.command(name="send", description="Send a message to a channel")
 async def send(interaction: discord.Interaction, channel: discord.TextChannel, message: str):
