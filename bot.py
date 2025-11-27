@@ -2,21 +2,6 @@ import discord
 from discord import app_commands
 import config
 import time
-from flask import Flask
-from threading import Thread
-
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot is running!"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
 
 # Intents: minimal but enough for slash commands + messaging
 intents = discord.Intents.default()
@@ -43,7 +28,6 @@ client = MyBot()
 # Slash Commands
 # ---------------------------
 
-# 1. Send a message to a channel
 @client.tree.command(name="send", description="Send a message to a channel")
 async def send(interaction: discord.Interaction, channel: discord.TextChannel, message: str):
     try:
@@ -56,13 +40,11 @@ async def send(interaction: discord.Interaction, channel: discord.TextChannel, m
             f"Failed to send message: {e}", ephemeral=True
         )
 
-# 2. Ping check
 @client.tree.command(name="ping", description="Check bot latency")
 async def ping(interaction: discord.Interaction):
     latency_ms = round(client.latency * 1000)
     await interaction.response.send_message(f"Latency: {latency_ms} ms", ephemeral=True)
 
-# 3. User info
 @client.tree.command(name="userinfo", description="Get information about a user")
 async def userinfo(interaction: discord.Interaction, user: discord.User):
     embed = discord.Embed(title="User Information", color=discord.Color.blue())
@@ -72,7 +54,6 @@ async def userinfo(interaction: discord.Interaction, user: discord.User):
     embed.set_thumbnail(url=user.display_avatar.url)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# 4. Server info
 @client.tree.command(name="serverinfo", description="Get information about this server")
 async def serverinfo(interaction: discord.Interaction):
     guild = interaction.guild
@@ -83,7 +64,6 @@ async def serverinfo(interaction: discord.Interaction):
     embed.set_thumbnail(url=guild.icon.url if guild.icon else discord.Embed.Empty)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# 5. Clear messages
 @client.tree.command(name="clear", description="Delete a number of messages from a channel")
 async def clear(interaction: discord.Interaction, channel: discord.TextChannel, limit: int):
     deleted = await channel.purge(limit=limit)
@@ -91,7 +71,6 @@ async def clear(interaction: discord.Interaction, channel: discord.TextChannel, 
         f"Deleted {len(deleted)} messages from {channel.mention}", ephemeral=True
     )
 
-# 6. Purge all messages
 @client.tree.command(name="purgeall", description="Delete ALL messages from a channel")
 async def purgeall(interaction: discord.Interaction, channel: discord.TextChannel):
     try:
@@ -102,13 +81,11 @@ async def purgeall(interaction: discord.Interaction, channel: discord.TextChanne
     except Exception as e:
         await interaction.response.send_message(f"Failed to purge: {e}", ephemeral=True)
 
-# 7. List roles
 @client.tree.command(name="roles", description="List all roles in the server")
 async def roles(interaction: discord.Interaction):
     role_names = [role.name for role in interaction.guild.roles if role.name != "@everyone"]
     await interaction.response.send_message("Roles:\n" + "\n".join(role_names), ephemeral=True)
 
-# 8. Uptime
 client.start_time = time.time()
 
 @client.tree.command(name="uptime", description="Show how long the bot has been running")
@@ -120,11 +97,10 @@ async def uptime(interaction: discord.Interaction):
         f"⏱Uptime: {hours}h {minutes}m {seconds}s", ephemeral=True
     )
 
-# 9. List channels
 @client.tree.command(name="channels", description="List all text channels in the server")
 async def channels(interaction: discord.Interaction):
     text_channels = [ch.name for ch in interaction.guild.text_channels]
     await interaction.response.send_message("Channels:\n" + "\n".join(text_channels), ephemeral=True)
 
-keep_alive()
+# Run the bot
 client.run(config.TOKEN)
