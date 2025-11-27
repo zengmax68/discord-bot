@@ -1,0 +1,21 @@
+name: Deploy via SFTP
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  sftp-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload files via SFTP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}        # fi11.bot-hosting.net
+          port: ${{ secrets.SERVER_PORT }}        # 21011
+          username: ${{ secrets.SERVER_USER }}    # 1343448070314135713.86c50825
+          key: ${{ secrets.SERVER_SSH_KEY }}      # your private SSH key
+          source: "./*"                           # files to upload
+          target: "/home/discord-bot"             # adjust to your bot’s directory
