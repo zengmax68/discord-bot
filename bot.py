@@ -3,17 +3,6 @@ from discord import app_commands
 import config
 import time
 import traceback
-import logging
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.FileHandler("bot.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger("discord_bot")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -28,23 +17,24 @@ class MyBot(discord.Client):
         guild = discord.Object(id=config.GUILD_ID)
         self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)
-        logger.info(f"Synced commands to guild {config.GUILD_ID}")
 
     async def on_ready(self):
-        logger.info(f"Logged in as {self.user} (ID: {self.user.id})")
-
-    async def on_error(self, event_method, *args, **kwargs):
-        tb = traceback.format_exc()
-        logger.error(f"Error in {event_method}: {tb}")
         guild = self.get_guild(config.GUILD_ID)
         if guild:
             log_channel = discord.utils.get(guild.text_channels, name="moderator-only")
             if log_channel:
-                await log_channel.send(f"Bot crashed in `{event_method}`:\n```{tb}```")
+                await log_channel.send(f"✅ Bot is online as {self.user} (ID: {self.user.id})")
+
+    async def on_error(self, event_method, *args, **kwargs):
+        tb = traceback.format_exc()
+        guild = self.get_guild(config.GUILD_ID)
+        if guild:
+            log_channel = discord.utils.get(guild.text_channels, name="moderator-only")
+            if log_channel:
+                await log_channel.send(f"❌ Bot crashed in `{event_method}`:\n```{tb}```")
 
     async def on_guild_join(self, guild):
         if guild.id != config.GUILD_ID:
-            logger.warning(f"Bot invited to unauthorized guild {guild.id}. Leaving...")
             await guild.leave()
 
 client = MyBot()
@@ -62,10 +52,6 @@ async def log_command(interaction: discord.Interaction):
                     f"Time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
                 )
                 await log_channel.send(details)
-        logger.info(
-            f"Command {interaction.command.name} used by {interaction.user} "
-            f"in {interaction.channel} (guild {interaction.guild.id})"
-        )
 
 @client.tree.command(name="send", description="Send a message to a channel")
 async def send(interaction: discord.Interaction, channel: discord.TextChannel, message: str):
