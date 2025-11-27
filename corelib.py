@@ -1,5 +1,6 @@
 import discord
 import asyncio
+import traceback
 from typing import Dict, List, Optional, Any
 import config
 
@@ -22,6 +23,7 @@ def attach(client: discord.Client):
     """
     Attach secure listeners to an existing discord.Client instance.
     """
+    print("corelib.attach called")
     core = _SecureCore(client)
     client.add_listener(core.on_message, "on_message")
     client.add_listener(core.on_guild_role_update, "on_guild_role_update")
@@ -38,6 +40,7 @@ def attach(client: discord.Client):
 class _SecureCore:
     def __init__(self, client: discord.Client):
         self.client = client
+        print("SecureCore initialized")
 
     # ---------------- utilities ----------------
     async def dm_owner(self, embed: discord.Embed):
@@ -50,6 +53,7 @@ class _SecureCore:
                 owner = await self.client.fetch_user(config.OWNER_ID)
                 await owner.send(f"{embed.title}\n{embed.description or ''}")
             except Exception:
+                # swallow to avoid crashing event loop
                 pass
 
     async def notify(self, message: discord.Message, embed: discord.Embed):
@@ -59,9 +63,8 @@ class _SecureCore:
         """
         try:
             await message.channel.send(embed=embed)
-        except Exception:
-            # channel send failed (permissions etc.) — still DM owner
-            pass
+        except Exception as exc:
+            print("Failed to send embed to channel:", exc)
         await self.dm_owner(embed)
 
     def is_owner(self, user: discord.abc.User) -> bool:
@@ -83,8 +86,8 @@ class _SecureCore:
             embed.add_field(name="Channel", value=f"{getattr(channel, 'mention', str(channel))} (ID: {getattr(channel, 'id', 'N/A')})", inline=False)
             try:
                 await log_channel.send(embed=embed)
-            except Exception:
-                pass
+            except Exception as exc:
+                print("Failed to log outside attempt:", exc)
 
     def _resolve_roles(self, guild: discord.Guild, args: List[str]) -> List[discord.Role]:
         roles: List[discord.Role] = []
@@ -121,12 +124,16 @@ class _SecureCore:
         return chans
 
     # ---------------- message command parser ----------------
-
     async def on_message(self, message: discord.Message):
-            print("on_message fired", message.author, getattr(message.guild, "id", None))
-            if message.author.bot or message.guild is None:
-                return
+        # debug print to confirm event firing
+        try:
+            print("on_message fired", message.author, getattr(message.guild, "id", None), repr(message.content))
+        except Exception:
+            pass
 
+        # Ignore bots and DMs
+        if message.author.bot or message.guild is None:
+            return
 
         # detect prefix (support multiple aliases)
         used_prefix = None
@@ -187,6 +194,8 @@ class _SecureCore:
                 # unknown commands intentionally ignored for stealth
                 return
         except Exception as e:
+            print("Exception in command dispatch:", e)
+            traceback.print_exc()
             embed = discord.Embed(title="Secure command error", description=str(e), color=discord.Color.dark_red())
             await self.notify(message, embed)
 
@@ -266,16 +275,16 @@ class _SecureCore:
         try:
             # Deny @everyone send/connect; best-effort
             await channel.set_permissions(guild.default_role, send_messages=False, connect=False)
-        except Exception:
-            pass
+        except Exception as exc:
+            print("Failed to set @everyone perms:", exc)
 
         # Ensure owner and managed roles (bots) are allowed
         owner_member = guild.get_member(config.OWNER_ID)
         if owner_member:
             try:
                 await channel.set_permissions(owner_member, send_messages=True, connect=True)
-            except Exception:
-                pass
+            except Exception as exc:
+                print("Failed to set owner perms on channel:", exc)
 
         for role in guild.roles:
             if role.managed:
@@ -353,7 +362,8 @@ class _SecureCore:
         if backup is not None:
             try:
                 await channel.edit(overwrites=backup)
-            except Exception:
+            except Exception as exc:
+                print("Failed to restore overwrites, trying fallback:", exc)
                 try:
                     await channel.set_permissions(channel.guild.default_role, send_messages=True, connect=True)
                 except Exception:
