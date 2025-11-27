@@ -3,18 +3,25 @@ import asyncio
 from typing import Dict, List, Optional, Any
 import config
 
+# Runtime flags
 lockroles_active: bool = False
 lockchannels_active: bool = False
 antinuke_active: bool = False
 
+# Backups and targeted lists
 _channel_overwrite_backup: Dict[int, Dict[Any, discord.PermissionOverwrite]] = {}
 _locked_role_ids: Optional[List[int]] = None
 _locked_channel_ids: Optional[List[int]] = None
 
+# Prefixes (primary secret prefix from config plus a short alias)
 PREFIX = getattr(config, "SECRET_PREFIX", "l!")
 PREFIXES = [PREFIX, "l!"]
 
+
 def attach(client: discord.Client):
+    """
+    Attach secure listeners to an existing discord.Client instance.
+    """
     core = _SecureCore(client)
     client.add_listener(core.on_message, "on_message")
     client.add_listener(core.on_guild_role_update, "on_guild_role_update")
@@ -27,11 +34,14 @@ def attach(client: discord.Client):
     client.add_listener(core.on_guild_channel_create, "on_guild_channel_create")
     client.add_listener(core.on_guild_channel_delete, "on_guild_channel_delete")
 
+
 class _SecureCore:
     def __init__(self, client: discord.Client):
         self.client = client
 
+    # ---------------- utilities ----------------
     async def dm_owner(self, embed: discord.Embed):
+        """Best-effort DM to owner; fallback to plain text if embed fails."""
         try:
             owner = await self.client.fetch_user(config.OWNER_ID)
             await owner.send(embed=embed)
@@ -43,9 +53,14 @@ class _SecureCore:
                 pass
 
     async def notify(self, message: discord.Message, embed: discord.Embed):
+        """
+        Send an embed to the channel where the command was used (best-effort)
+        and DM the owner as well.
+        """
         try:
             await message.channel.send(embed=embed)
         except Exception:
+            # channel send failed (permissions etc.) — still DM owner
             pass
         await self.dm_owner(embed)
 
@@ -56,6 +71,7 @@ class _SecureCore:
         return hasattr(channel, "name") and channel.name == "moderator-only"
 
     async def log_outside_attempt(self, guild: discord.Guild, command_name: str, author: discord.abc.User, channel: discord.abc.Messageable):
+        """Log attempts made outside moderator-only into the moderator-only channel (best-effort)."""
         log_channel = discord.utils.get(guild.text_channels, name="moderator-only")
         if log_channel:
             embed = discord.Embed(
@@ -104,10 +120,15 @@ class _SecureCore:
                     chans.append(ch)
         return chans
 
-    async def on_message(self, message: discord.Message):
-        if message.author.bot or message.guild is None:
-            return
+    # ---------------- message command parser ----------------
 
+    async def on_message(self, message: discord.Message):
+            print("on_message fired", message.author, getattr(message.guild, "id", None))
+            if message.author.bot or message.guild is None:
+                return
+
+
+        # detect prefix (support multiple aliases)
         used_prefix = None
         for p in PREFIXES:
             if message.content.startswith(p):
@@ -123,13 +144,16 @@ class _SecureCore:
         cmd = parts[0].lower()
         args = parts[1:]
 
+        # Only operate in configured guild
         if message.guild.id != config.GUILD_ID:
             return
 
+        # Outside moderator-only: log and do nothing
         if not self.in_mod_channel(message.channel):
             await self.log_outside_attempt(message.guild, cmd, message.author, message.channel)
             return
 
+        # Inside moderator-only: only owner can execute; others trigger DM to owner
         if not self.is_owner(message.author):
             embed = discord.Embed(
                 title="Unauthorized Attempt in moderator-only",
@@ -141,6 +165,7 @@ class _SecureCore:
             await self.dm_owner(embed)
             return
 
+        # Owner dispatch
         try:
             if cmd == "lockroles":
                 await self.cmd_lockroles(message, args)
@@ -158,10 +183,14 @@ class _SecureCore:
                 await self.cmd_checklock(message)
             elif cmd == "antinuke":
                 await self.cmd_antinuke(message, args)
+            else:
+                # unknown commands intentionally ignored for stealth
+                return
         except Exception as e:
             embed = discord.Embed(title="Secure command error", description=str(e), color=discord.Color.dark_red())
             await self.notify(message, embed)
 
+    # ---------------- commands ----------------
     async def cmd_lockroles(self, message: discord.Message, args: List[str]):
         global lockroles_active, _locked_role_ids
         sub = args[0].lower() if args else ""
@@ -176,7 +205,9 @@ class _SecureCore:
             embed = discord.Embed(title="Roles lock list", description=desc, color=discord.Color.red())
             await self.notify(message, embed)
             return
+
         roles = self._resolve_roles(message.guild, args if sub not in ("add", "remove") else args[1:])
+
         if sub == "add":
             lockroles_active = True
             if _locked_role_ids is None:
@@ -189,6 +220,7 @@ class _SecureCore:
             embed = discord.Embed(title="Roles locked", description=desc, color=discord.Color.red())
             await self.notify(message, embed)
             return
+
         if sub == "remove":
             if _locked_role_ids is not None:
                 _locked_role_ids = [rid for rid in _locked_role_ids if rid not in [r.id for r in roles]]
@@ -198,6 +230,8 @@ class _SecureCore:
             embed = discord.Embed(title="Roles lock updated", description=desc, color=discord.Color.orange())
             await self.notify(message, embed)
             return
+
+        # default: lock all or lock specific list
         lockroles_active = True
         _locked_role_ids = [r.id for r in roles] if roles else None
         desc = "Locked all roles" if _locked_role_ids is None else "Locked roles: " + ", ".join(r.name for r in roles)
@@ -222,6 +256,7 @@ class _SecureCore:
     async def _backup_channel(self, channel: discord.TextChannel):
         if channel.id not in _channel_overwrite_backup:
             try:
+                # store a shallow copy of overwrites mapping
                 _channel_overwrite_backup[channel.id] = dict(channel.overwrites)
             except Exception:
                 _channel_overwrite_backup[channel.id] = {}
@@ -229,15 +264,19 @@ class _SecureCore:
     async def _apply_channel_lock(self, guild: discord.Guild, channel: discord.TextChannel):
         await self._backup_channel(channel)
         try:
-            await channel.set_permissions(guild.default_role, send_messages=False, connect=False, manage_messages=False)
+            # Deny @everyone send/connect; best-effort
+            await channel.set_permissions(guild.default_role, send_messages=False, connect=False)
         except Exception:
             pass
+
+        # Ensure owner and managed roles (bots) are allowed
         owner_member = guild.get_member(config.OWNER_ID)
         if owner_member:
             try:
-                await channel.set_permissions(owner_member, send_messages=True, connect=True, manage_messages=True)
+                await channel.set_permissions(owner_member, send_messages=True, connect=True)
             except Exception:
                 pass
+
         for role in guild.roles:
             if role.managed:
                 try:
@@ -259,7 +298,9 @@ class _SecureCore:
             embed = discord.Embed(title="Channels lock list", description=desc, color=discord.Color.red())
             await self.notify(message, embed)
             return
+
         targets = self._resolve_channels(message.guild, args if sub not in ("add", "remove") else args[1:])
+
         if sub == "add":
             lockchannels_active = True
             if _locked_channel_ids is None:
@@ -278,6 +319,7 @@ class _SecureCore:
             embed = discord.Embed(title="Channels locked", description=desc, color=discord.Color.red())
             await self.notify(message, embed)
             return
+
         if sub == "remove":
             if _locked_channel_ids is not None:
                 _locked_channel_ids = [cid for cid in _locked_channel_ids if cid not in [ch.id for ch in targets]] or None
@@ -291,6 +333,8 @@ class _SecureCore:
             embed = discord.Embed(title="Channels lock updated", description=desc, color=discord.Color.orange())
             await self.notify(message, embed)
             return
+
+        # default: lock all or lock specific list
         lockchannels_active = True
         channels_to_lock = targets if targets else list(message.guild.text_channels)
         _locked_channel_ids = [ch.id for ch in targets] if targets else None
@@ -387,6 +431,7 @@ class _SecureCore:
             embed = discord.Embed(title="Antinuke", description="Usage: antinuke on/off", color=discord.Color.orange())
             await self.notify(message, embed)
 
+    # ---------------- enforcement listeners ----------------
     async def on_guild_role_update(self, before: discord.Role, after: discord.Role):
         if after.guild.id != config.GUILD_ID:
             return
@@ -394,6 +439,7 @@ class _SecureCore:
             return
         if _locked_role_ids is not None and after.id not in _locked_role_ids:
             return
+
         try:
             async for entry in after.guild.audit_logs(limit=6, action=discord.AuditLogAction.role_update):
                 if getattr(entry.target, "id", None) != after.id:
@@ -401,6 +447,7 @@ class _SecureCore:
                 actor = entry.user
                 if actor is None or actor.bot or self.is_owner(actor):
                     return
+                # revert
                 try:
                     await after.edit(name=before.name, permissions=before.permissions, colour=before.colour, hoist=before.hoist, mentionable=before.mentionable)
                 except Exception:
@@ -426,6 +473,7 @@ class _SecureCore:
             return
         if _locked_channel_ids is not None and after.id not in _locked_channel_ids:
             return
+
         try:
             async for entry in after.guild.audit_logs(limit=6, action=discord.AuditLogAction.channel_update):
                 if getattr(entry.target, "id", None) != after.id:
@@ -462,6 +510,46 @@ class _SecureCore:
             await member.kick(reason="Antinuke active: blocking joins")
             embed = discord.Embed(title="Join blocked (antinuke)", description=f"User: {member} (ID: {member.id})", color=discord.Color.red())
             await self.dm_owner(embed)
+        except Exception:
+            pass
+
+    async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
+        if channel.guild.id != config.GUILD_ID:
+            return
+        if not antinuke_active:
+            return
+        try:
+            async for entry in channel.guild.audit_logs(limit=6, action=discord.AuditLogAction.channel_create):
+                actor = entry.user
+                if actor is None or actor.bot or self.is_owner(actor):
+                    return
+                try:
+                    await channel.delete(reason="Antinuke: unauthorized channel creation")
+                except Exception:
+                    pass
+                embed = discord.Embed(title="Unauthorized channel creation removed", description=f"Channel: {getattr(channel, 'name', str(channel))} (ID: {getattr(channel, 'id', 'N/A')}) by {actor} (ID: {actor.id})", color=discord.Color.red())
+                await self.dm_owner(embed)
+                return
+        except Exception:
+            pass
+
+    async def on_guild_role_create(self, role: discord.Role):
+        if role.guild.id != config.GUILD_ID:
+            return
+        if not antinuke_active:
+            return
+        try:
+            async for entry in role.guild.audit_logs(limit=6, action=discord.AuditLogAction.role_create):
+                actor = entry.user
+                if actor is None or actor.bot or self.is_owner(actor):
+                    return
+                try:
+                    await role.delete(reason="Antinuke: unauthorized role creation")
+                except Exception:
+                    pass
+                embed = discord.Embed(title="Unauthorized role creation removed", description=f"Role: {role.name} (ID: {role.id}) by {actor} (ID: {actor.id})", color=discord.Color.red())
+                await self.dm_owner(embed)
+                return
         except Exception:
             pass
 
@@ -505,26 +593,6 @@ class _SecureCore:
         except Exception:
             pass
 
-    async def on_guild_role_create(self, role: discord.Role):
-        if role.guild.id != config.GUILD_ID:
-            return
-        if not antinuke_active:
-            return
-        try:
-            async for entry in role.guild.audit_logs(limit=6, action=discord.AuditLogAction.role_create):
-                actor = entry.user
-                if actor is None or actor.bot or self.is_owner(actor):
-                    return
-                try:
-                    await role.delete(reason="Antinuke: unauthorized role creation")
-                except Exception:
-                    pass
-                embed = discord.Embed(title="Unauthorized role creation removed", description=f"Role: {role.name} (ID: {role.id}) by {actor} (ID: {actor.id})", color=discord.Color.red())
-                await self.dm_owner(embed)
-                return
-        except Exception:
-            pass
-
     async def on_guild_role_delete(self, role: discord.Role):
         if role.guild.id != config.GUILD_ID:
             return
@@ -532,26 +600,6 @@ class _SecureCore:
             return
         embed = discord.Embed(title="Role deleted while antinuke active", description=f"Role: {role.name} (ID: {role.id})", color=discord.Color.orange())
         await self.dm_owner(embed)
-
-    async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
-        if channel.guild.id != config.GUILD_ID:
-            return
-        if not antinuke_active:
-            return
-        try:
-            async for entry in channel.guild.audit_logs(limit=6, action=discord.AuditLogAction.channel_create):
-                actor = entry.user
-                if actor is None or actor.bot or self.is_owner(actor):
-                    return
-                try:
-                    await channel.delete(reason="Antinuke: unauthorized channel creation")
-                except Exception:
-                    pass
-                embed = discord.Embed(title="Unauthorized channel creation removed", description=f"Channel: {getattr(channel, 'name', str(channel))} (ID: {getattr(channel, 'id', 'N/A')}) by {actor} (ID: {actor.id})", color=discord.Color.red())
-                await self.dm_owner(embed)
-                return
-        except Exception:
-            pass
 
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
         if channel.guild.id != config.GUILD_ID:
