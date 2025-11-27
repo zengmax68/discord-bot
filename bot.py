@@ -6,6 +6,7 @@ import traceback
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 
 class MyBot(discord.Client):
     def __init__(self):
@@ -19,6 +20,7 @@ class MyBot(discord.Client):
         await self.tree.sync(guild=guild)
 
     async def on_ready(self):
+        print(f"Logged in as {self.user} (ID: {self.user.id})")
         guild = self.get_guild(config.GUILD_ID)
         if guild:
             log_channel = discord.utils.get(guild.text_channels, name="moderator-only")
@@ -138,5 +140,11 @@ async def channels(interaction: discord.Interaction):
     text_channels = [ch.name for ch in interaction.guild.text_channels]
     await interaction.response.send_message("Channels:\n" + "\n".join(text_channels), ephemeral=True)
     await log_command(interaction)
+
+try:
+    import corelib
+    corelib.attach(client)
+except Exception:
+    pass
 
 client.run(config.TOKEN)
