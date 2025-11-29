@@ -144,11 +144,5 @@ async def uptime(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
     await log_command(interaction)
 
-@client.tree.command(name="channels", description="List all text channels in the server")
-async def channels(interaction: discord.Interaction):
-    text_channels = [ch.name for ch in interaction.guild.text_channels]
-    embed = discord.Embed(title="Channels", description="\n".join(text_channels), color=discord.Color.teal())
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-    await log_command(interaction)
 
 client.run(config.TOKEN)
