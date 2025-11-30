@@ -11,6 +11,5 @@ This bot is restricted to the **State** Discord server only, hence unavailble fo
 - `/clear <channel> <limit>` — Delete a number of recent messages.
 - `/purgeall <channel>` — Delete all messages from a channel.
 - `/roles` — List all roles in the server.
-- `/uptime` — Show how long the bot has been running.
-- `/channels` — List all text channels in the server.
+- `/uptime` — Show how long the bot has been running
 
